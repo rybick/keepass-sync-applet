@@ -1,7 +1,7 @@
 {
-    "uuid": "force-quit@cinnamon.org",
-    "name": "Force Quit",
-    "description": "Click on the applet to launch xkill and force any window to quit immediately",
-    "icon": "force-exit"
+    "uuid": "keepass-sync-applet@rybick.github.io",
+    "name": "keepass-sync-applet",
+    "description": "cinnamon applet for synchronizing keepass vaults over ssh",
+    "icon": "keepass-sync-applet"
 }
 
