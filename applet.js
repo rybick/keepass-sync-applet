@@ -26,38 +26,30 @@ MyApplet.prototype = {
         this.set_applet_tooltip(_("Everything synced-up"));
 
         this.menuManager = new PopupMenu.PopupMenuManager(this);
-        this.menu = createMenu(this, orientation);
-        this.menuManager.addMenu(this.menu);
+        createMenuAsync(this, orientation, (menu) => {
+            this.menuManager.addMenu(menu);
+            this.menu = menu;
+        });
     },
 
     on_applet_clicked: function() {
-        global.log("Applet clicked");
         this.menu.toggle();
     }
 };
 
-function createMenu(launcher, orientation) {
-    runCommandAsync(["ls", "-la"], (stdout) => { global.log(stdout); });
-
-    let menu = new Applet.AppletPopupMenu(launcher, orientation);
-    let item1 = new PopupMenu.PopupMenuItem("Option #1");
-    item1.connect('activate', () => {
-        runCommandAsync(["ssh", config.sshHost, `ls ${config.path}`], (stdout) => {
-            let dirs = stdout.split('\n').filter(dir => dir);
-            global.log(dirs);
-        });
-        //Util.spawnCommandLine('xkill');
+function createMenuAsync(launcher, orientation, callback) {
+    runCommandAsync(["ssh", config.sshHost, `ls ${config.path}`], (stdout) => {
+        let dirs = stdout.split('\n').filter(dir => dir);
+        let menu = new Applet.AppletPopupMenu(launcher, orientation);
+        dirs.forEach((dirName) => {
+            let item = new PopupMenu.PopupMenuItem(dirName);
+            item.connect('activate', () => {
+                global.log(dirName + " clicked");
+            });
+            menu.addMenuItem(item);
+        })
+        callback(menu);
     });
-    menu.addMenuItem(item1);
-
-    let item2 = new PopupMenu.PopupMenuItem("Option #2");
-    item2.connect('activate', () => {
-        global.log(loadConfig());
-        //global.log("Settings clicked!");
-    });
-    menu.addMenuItem(item2);
-
-    return menu;
 }
 
 function runCommandAsync(argv, callback) {
