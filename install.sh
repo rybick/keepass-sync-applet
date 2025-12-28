@@ -3,4 +3,5 @@ mkdir -p $path
 rm -rf $path/*
 cp metadata.json $path/
 cp applet.js $path/
+cp config.json $path/
 cp -r icons/ $path/
