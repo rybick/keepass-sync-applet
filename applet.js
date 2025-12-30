@@ -30,22 +30,31 @@ MyApplet.prototype = {
     _init: async function(orientation, panel_height, instance_id) {
         Applet.IconApplet.prototype._init.call(this, orientation, panel_height, instance_id);
 
-        this._setStatus("neutral", "Everything synced-up");
+        this._setStatus("fatal", "Loading...");
 
         this.menuManager = new PopupMenu.PopupMenuManager(this);
         const dirs = await this._getDirs();
         const menu = await this._createMenuAsync(this, orientation, dirs);
         this.menuManager.addMenu(menu);
         this.menu = menu;
+        this.dirs = dirs;
 
-        const status = await this._checkStatus(dirs);
-        if (!status.localDirSynced) {
-            this._setStatus("high", "local db not uploaded!");
-        }
+        this._refresh();
     },
 
-    on_applet_clicked: function() {
+    on_applet_clicked: async function() {
         this.menu.toggle();
+        await this._refresh();
+    },
+
+    _refresh: async function() {
+        const status = await this._checkStatus(this.dirs);
+        if (!status.localDirSynced) {
+            this._setStatus("high", "local db not uploaded!");
+        } else {
+            // else if () others not synced low
+            this._setStatus("neutral", "Everything synced-up");
+        }
     },
 
     _setStatus: function(level, message) {
