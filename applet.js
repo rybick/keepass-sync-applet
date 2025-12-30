@@ -30,54 +30,89 @@ MyApplet.prototype = {
     _init: async function(orientation, panel_height, instance_id) {
         Applet.IconApplet.prototype._init.call(this, orientation, panel_height, instance_id);
 
-        this.set_applet_icon_symbolic_name("ksa-low");
-        this.set_applet_tooltip(_("Everything synced-up"));
+        this._setStatus("neutral", "Everything synced-up");
 
         this.menuManager = new PopupMenu.PopupMenuManager(this);
-        const menu = await this._createMenuAsync(this, orientation);
+        const dirs = await this._getDirs();
+        const menu = await this._createMenuAsync(this, orientation, dirs);
         this.menuManager.addMenu(menu);
         this.menu = menu;
+
+        const status = await this._checkStatus(dirs);
+        if (!status.localDirSynced) {
+            this._setStatus("high", "local db not uploaded!");
+        }
     },
 
     on_applet_clicked: function() {
         this.menu.toggle();
     },
 
-    _createMenuAsync: async function(launcher, orientation) {
-        const stdout = await runCommandAsync(["ssh", config.remoteHost, `ls ${config.remotePath}`]);
-        const dirs = stdout.split('\n').filter(dir => dir);
+    _setStatus: function(level, message) {
+        this.set_applet_icon_symbolic_name("ksa-" + level);
+        this.set_applet_tooltip(_(message));
+    },
+
+    _getDirs: async function() {
+        const cmdOut = await runSshAsync(`ls ${config.remotePath}`);
+        const dirs = cmdOut.split('\n').filter(dir => dir);
         const localName = config.localName
         const [localDir, otherDirs] = partitionSingle(dirs, dir => dir === config.localName)
         if (!localDir) {
             this._fail("localDir not present");
         }
+        return {
+            "localDir": localDir,
+            "otherDirs": otherDirs
+        }
+    },
+
+    _createMenuAsync: async function(launcher, orientation, dirs) {
         const menu = new Applet.AppletPopupMenu(launcher, orientation);
-        [localDir].concat(otherDirs).forEach((dirName) => {
+        [dirs.localDir].concat(dirs.otherDirs).forEach((dirName) => {
             let item = new PopupMenu.PopupMenuItem(dirName);
-            item.connect('activate', () => {
-                global.log(dirName + " clicked");
+            item.connect('activate', async () => {
+                const synced = await this._isLocalDirSynced(dirName);
+                global.log(dirName + " clicked: " + synced);
             });
             menu.addMenuItem(item);
         })
         return menu;
     },
 
-    _checkStatus: async function(localDir, otherDirs) {
-
+    _checkStatus: async function(dirs) {
+        const localDirSynced = await this._isLocalDirSynced(dirs.localDir)
+        const otherDirsGood = dirs.otherDirs.map((dir) => [dir, true])
+        return {
+            "localDirSynced": localDirSynced,
+            "otherDirs": Object.fromEntries(otherDirsGood)
+        }
     },
 
     _isLocalDirSynced: async function(localDir) {
-
+        const localSha = await runShellAsync(`shasum "${config.localPath}/${config.fileName}" | awk '{print $1}'`);
+        const remoteSha = await runSshAsync(`shasum "${config.remotePath}/${localDir}/${config.fileName}" | awk '{print $1}'`);
+        global.log(localSha, remoteSha);
+        return localSha == remoteSha
     },
 
     _fail: function(msg) {
-        const decoratedMessage = "[FATAL ERRROR]: " + msg;
+        const decoratedMessage = "[FATAL ERROR]: " + msg;
         global.logError(decoratedMessage);
         this.set_applet_icon_symbolic_name("ksa-fatal");
         this.set_applet_tooltip(_(decoratedMessage));
         throw Error(decoratedMessage)
     }
+
 };
+
+async function runShellAsync(shCmd) {
+    return await runCommandAsync(["sh", "-c", shCmd]);
+}
+
+async function runSshAsync(sshCmd) {
+    return await runCommandAsync(["ssh", config.remoteHost, "LC_ALL=C " + sshCmd]);
+}
 
 async function runCommandAsync(argv, callback) {
     return new Promise((resolve, reject) => {
