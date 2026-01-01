@@ -3,6 +3,7 @@ const PopupMenu = imports.ui.popupMenu;
 const Util = imports.misc.util;
 const Gio = imports.gi.Gio;
 const GLib = imports.gi.GLib;
+const Main = imports.ui.main;
 
 const appletId = 'keepass-sync-applet@rybick.github.io'
 
@@ -90,15 +91,49 @@ MyApplet.prototype = {
 
     _createMenuAsync: async function(launcher, orientation, dirs) {
         const menu = new Applet.AppletPopupMenu(launcher, orientation);
-        [dirs.localDir].concat(dirs.otherDirs).forEach((dirName) => {
-            let item = new PopupMenu.PopupMenuItem(dirName);
-            item.connect('activate', async () => {
-                const synced = await this._isLocalDirSynced(dirName);
-                global.log(dirName + " clicked: " + synced);
-            });
-            menu.addMenuItem(item);
-        })
+        menu.addMenuItem(this._createUploadLocalMenuItem(dirs.localDir));
+        this._createDownloadRemoteMenuItem(dirs.otherDirs).forEach((it) => menu.addMenuItem(it));
         return menu;
+    },
+
+    _createUploadLocalMenuItem: function(localDir) {
+        let item = new PopupMenu.PopupMenuItem(`Upload ${localDir}`);
+        item.connect('activate', async () => { try {
+            try {
+                await runCommandAsync([
+                    "scp",
+                    `${config.localPath}/${config.fileName}`,
+                    `${config.remoteHost}:${config.remotePath}/${localDir}/`
+                ]);
+            } catch (e) {
+                global.logError(e);
+                await Main.notify(`${localDir} - failed to upload`);
+                return;
+            }
+            await Main.notify(`${localDir} uploaded`);
+        } catch (e) { global.logError(e); } });
+        return item;
+    },
+
+    _createDownloadRemoteMenuItem: function(otherDirs) {
+        return otherDirs.map((dirName) => {
+            let item = new PopupMenu.PopupMenuItem(`Download ${dirName}`);
+            item.connect('activate', async () => { try {
+                try {
+                    await runCommandAsync([
+                        "scp",
+                        `${config.remoteHost}:${config.remotePath}/${dirName}/${config.fileName}`,
+                        `${config.localPath}/${dirName}.${config.extension}`
+                    ]);
+                } catch (e) {
+                    global.logError(e);
+                    await Main.notify(`${dirName} - failed to download`);
+                    return;
+                }
+                await Main.notify(`${dirName} downloaded`)
+            } catch (e) { global.logError(e); } });
+            return item;
+        });
     },
 
     _checkStatus: async function(dirs) {
@@ -142,7 +177,7 @@ async function runSshAsync(sshCmd) {
     return await runCommandAsync(["ssh", config.remoteHost, "LC_ALL=C " + sshCmd]);
 }
 
-async function runCommandAsync(argv, callback) {
+async function runCommandAsync(argv) {
     return new Promise((resolve, reject) => {
         try {
             let proc = new Gio.Subprocess({
@@ -154,9 +189,11 @@ async function runCommandAsync(argv, callback) {
                 try {
                     let [ok, stdout, stderr] = proc.communicate_utf8_finish(res);
                     if (stderr) {
-                        global.log("stderr: " + stderr);
+                        global.logError("runCommandAsync failed on server: " + stderr);
+                        reject(stderr);
+                    } else {
+                        resolve(stdout);
                     }
-                    resolve(stdout);
                 } catch (e) {
                     global.logError(e);
                     reject(e);
