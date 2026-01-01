@@ -28,31 +28,43 @@ MyApplet.prototype = {
     __proto__: Applet.IconApplet.prototype,
 
     _init: async function(orientation, panel_height, instance_id) {
-        Applet.IconApplet.prototype._init.call(this, orientation, panel_height, instance_id);
+        try {
+            Applet.IconApplet.prototype._init.call(this, orientation, panel_height, instance_id);
 
-        this._setStatus("fatal", "Loading...");
+            this._setStatus("loading", "Loading...");
 
-        this.menuManager = new PopupMenu.PopupMenuManager(this);
-        const dirs = await this._getDirs();
-        const menu = await this._createMenuAsync(this, orientation, dirs);
-        this.menuManager.addMenu(menu);
-        this.menu = menu;
-        this.dirs = dirs;
+            this.menuManager = new PopupMenu.PopupMenuManager(this);
+            const dirs = await this._getDirs();
+            const menu = await this._createMenuAsync(this, orientation, dirs);
+            this.menuManager.addMenu(menu);
+            this.menu = menu;
+            this.dirs = dirs;
 
-        this._refresh();
+            await this._refresh();
+        } catch (e) {
+            this._fail(e);
+        }
     },
 
     on_applet_clicked: async function() {
-        this.menu.toggle();
-        await this._refresh();
+        try {
+            this.menu.toggle();
+            await this._refresh();
+        } catch (e) {
+            this._fail(e);
+        }
     },
 
     _refresh: async function() {
         const status = await this._checkStatus(this.dirs);
         if (!status.localDirSynced) {
             this._setStatus("high", "local db not uploaded!");
+        } else if (Object.values(status.otherDirs).some((good) => !good)) {
+            const badDirs = Object.entries(status.otherDirs)
+                .filter(([dir, good]) => !good)
+                .map(([dir]) => dir);
+            this._setStatus("low", `${badDirs} seem to be newer than local backup`);
         } else {
-            // else if () others not synced low
             this._setStatus("neutral", "Everything synced-up");
         }
     },
@@ -91,7 +103,11 @@ MyApplet.prototype = {
 
     _checkStatus: async function(dirs) {
         const localDirSynced = await this._isLocalDirSynced(dirs.localDir)
-        const otherDirsGood = dirs.otherDirs.map((dir) => [dir, true])
+        const backupOfLocalTs = await this._getLastPasswordsModifyTs(dirs.localDir)
+        const otherDirsGood = await Promise.all(dirs.otherDirs.map(async (dir) => {
+            const modifyTs = await this._getLastPasswordsModifyTs(dir);
+            return [dir, backupOfLocalTs > modifyTs];
+        }));
         return {
             "localDirSynced": localDirSynced,
             "otherDirs": Object.fromEntries(otherDirsGood)
@@ -101,8 +117,11 @@ MyApplet.prototype = {
     _isLocalDirSynced: async function(localDir) {
         const localSha = await runShellAsync(`shasum "${config.localPath}/${config.fileName}" | awk '{print $1}'`);
         const remoteSha = await runSshAsync(`shasum "${config.remotePath}/${localDir}/${config.fileName}" | awk '{print $1}'`);
-        global.log(localSha, remoteSha);
         return localSha == remoteSha
+    },
+
+    _getLastPasswordsModifyTs: async function(dir) {
+        return Number(await runSshAsync(`stat -c '%Y' ${config.remotePath}/${dir}/${config.fileName}`));
     },
 
     _fail: function(msg) {
