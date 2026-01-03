@@ -189,7 +189,7 @@ async function runCommandAsync(argv) {
                 try {
                     let [ok, stdout, stderr] = proc.communicate_utf8_finish(res);
                     if (stderr) {
-                        global.logError("runCommandAsync failed on server: " + stderr);
+                        global.logError("runCommandAsync - command failed: " + stderr);
                         reject(stderr);
                     } else {
                         resolve(stdout);
