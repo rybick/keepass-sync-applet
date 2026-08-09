@@ -64,7 +64,7 @@ MyApplet.prototype = {
             const badDirs = Object.entries(status.otherDirs)
                 .filter(([dir, good]) => !good)
                 .map(([dir]) => dir);
-            this._setStatus("low", `${badDirs} seem to be newer than local backup`);
+            this._setStatus("low", `${badDirs} is newer than and differs from the local backup`);
         } else {
             this._setStatus("neutral", "Everything synced-up");
         }
@@ -138,10 +138,13 @@ MyApplet.prototype = {
 
     _checkStatus: async function(dirs) {
         const localDirSynced = await this._isLocalDirSynced(dirs.localDir)
-        const backupOfLocalTs = await this._getLastPasswordsModifyTs(dirs.localDir)
+        const backupOfLocalTs = await this._getLastRemotePasswordsModifyTs(dirs.localDir)
         const otherDirsGood = await Promise.all(dirs.otherDirs.map(async (dir) => {
-            const modifyTs = await this._getLastPasswordsModifyTs(dir);
-            return [dir, backupOfLocalTs > modifyTs];
+            const modifyTs = await this._getLastRemotePasswordsModifyTs(dir);
+            const remoteShaSum = await this._getRemotePasswordsSha(dir);
+            const localCopyShaSum = await this._getLocalCopyShaSum(dir);
+            const shaSumMatches = remoteShaSum == localCopyShaSum;
+            return [dir, backupOfLocalTs > modifyTs || shaSumMatches];
         }));
         return {
             "localDirSynced": localDirSynced,
@@ -151,12 +154,25 @@ MyApplet.prototype = {
 
     _isLocalDirSynced: async function(localDir) {
         const localSha = await runShellAsync(`shasum "${config.localPath}/${config.fileName}" | awk '{print $1}'`);
-        const remoteSha = await runSshAsync(`shasum "${config.remotePath}/${localDir}/${config.fileName}" | awk '{print $1}'`);
+        const remoteSha = await this._getRemotePasswordsSha(localDir)
         return localSha == remoteSha
     },
 
-    _getLastPasswordsModifyTs: async function(dir) {
+    _getLastRemotePasswordsModifyTs: async function(dir) {
         return Number(await runSshAsync(`stat -c '%Y' ${config.remotePath}/${dir}/${config.fileName}`));
+    },
+
+    _getRemotePasswordsSha: async function(dir) {
+        return await runSshAsync(`shasum "${config.remotePath}/${dir}/${config.fileName}" | awk '{print $1}'`);
+    },
+
+    _getLocalCopyShaSum: async function(dir) {
+        const filePath = `${config.localPath}/${dir}.${config.extension}`
+        if (Gio.File.new_for_path(filePath).query_exists(null)) {
+            return await runShellAsync(`shasum "${filePath}" | awk '{print $1}'`);
+        } else {
+            return null
+        }
     },
 
     _fail: function(msg) {
